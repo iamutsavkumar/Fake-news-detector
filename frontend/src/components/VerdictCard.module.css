@@ -45,3 +45,9 @@
   font-size: 0.78rem;
   opacity: 0.65;
 }
+
+.uncertain {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeeba;
+}

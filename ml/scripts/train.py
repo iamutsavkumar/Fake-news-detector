@@ -1,59 +1,23 @@
 #!/usr/bin/env python3
 """
-ml/scripts/train.py
-====================
-End-to-end training pipeline for the fake news classifier.
-
-Dataset
--------
-Uses the Kaggle "Fake and Real News Dataset":
-  https://www.kaggle.com/datasets/clmentbisaillon/fake-and-real-news-dataset
-
-Files expected in ml/data/:
-  - Fake.csv  (23,481 rows)
-  - True.csv  (21,417 rows)
-
-Download instructions:
-  1. Install kaggle CLI:  pip install kaggle
-  2. Place your API key at ~/.kaggle/kaggle.json
-  3. Run:
-     kaggle datasets download -d clmentbisaillon/fake-and-real-news-dataset -p ml/data --unzip
-
-Alternatively, download manually from the URL above and unzip into ml/data/.
-
-Pipeline
---------
-  1. Load + label data
-  2. Preprocess (clean, lemmatize)
-  3. TF-IDF feature extraction
-  4. Train Logistic Regression (L2) — fast, accurate baseline
-  5. Evaluate with full classification report + confusion matrix
-  6. Serialise model artefacts to backend/models/
-
-Usage
------
-  cd fakenews/
-  python ml/scripts/train.py [--data-dir ml/data] [--output-dir backend/models]
+FINAL training pipeline for fake news detection
 """
-
-#!/usr/bin/env python3
 
 import argparse
 import logging
-import sys
 import re
 from pathlib import Path
 
 import joblib
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import accuracy_score, classification_report, f1_score
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
+from sklearn.utils import resample
 
 # ── Logging ─────────────────────────────────────────────
 
@@ -62,8 +26,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-# ── Constants ───────────────────────────────────────────
 
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
@@ -80,11 +42,11 @@ def load_dataset(data_dir: Path) -> pd.DataFrame:
 
     logger.info("Loading Fake.csv …")
     fake_df = pd.read_csv(fake_path)
-    fake_df["label"] = "FAKE"
+    fake_df["label"] = 0  # FAKE
 
     logger.info("Loading True.csv …")
     true_df = pd.read_csv(true_path)
-    true_df["label"] = "REAL"
+    true_df["label"] = 1  # REAL
 
     df = pd.concat([fake_df, true_df], ignore_index=True)
 
@@ -96,7 +58,7 @@ def load_dataset(data_dir: Path) -> pd.DataFrame:
     return df[["content", "label"]]
 
 
-# ── Preprocessing (Improved for real-world) ─────────────
+# ── Preprocessing ───────────────────────────────────────
 
 def clean_text(text: str) -> str:
     text = re.sub(r"http\S+", "", text)
@@ -114,29 +76,57 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
     df["content"] = df["content"].progress_apply(clean_text)
 
     df = df[df["content"].str.len() > 20].reset_index(drop=True)
-    logger.info("After preprocessing: %d samples", len(df))
 
+    logger.info("After preprocessing: %d samples", len(df))
     return df
+
+
+# ── FIXED: Balanced Dataset ─────────────────────────────
+
+def balance_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    fake = df[df["label"] == 0]
+    real = df[df["label"] == 1]
+
+    # 🔥 Safe balancing using minimum class size
+    min_size = min(len(fake), len(real))
+
+    fake_balanced = resample(
+        fake,
+        replace=False,
+        n_samples=min_size,
+        random_state=RANDOM_STATE
+    )
+
+    real_balanced = resample(
+        real,
+        replace=False,
+        n_samples=min_size,
+        random_state=RANDOM_STATE
+    )
+
+    df_balanced = pd.concat([fake_balanced, real_balanced])
+    df_balanced = df_balanced.sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
+
+    logger.info("Balanced dataset: %d samples", len(df_balanced))
+    return df_balanced
 
 
 # ── Model Pipeline ──────────────────────────────────────
 
 def build_pipeline() -> Pipeline:
     vectorizer = TfidfVectorizer(
-        max_features=20000,
+        max_features=50000,
         ngram_range=(1, 2),
-        min_df=3,
+        min_df=2,
         max_df=0.9,
-        stop_words="english",
-        sublinear_tf=True,
+        stop_words="english"
     )
 
-    classifier = LogisticRegression(
-        C=1.0,
-        max_iter=2000,
+    classifier = SGDClassifier(
+        loss="log_loss",
+        max_iter=1000,
         class_weight="balanced",
-        n_jobs=-1,
-        random_state=RANDOM_STATE,
+        random_state=RANDOM_STATE
     )
 
     return Pipeline([
@@ -153,13 +143,6 @@ def train(df: pd.DataFrame) -> Pipeline:
 
     pipeline = build_pipeline()
 
-    # 🔥 Cross-validation (REAL accuracy)
-    logger.info("Running cross-validation…")
-    scores = cross_val_score(pipeline, X, y, cv=5, n_jobs=-1)
-
-    logger.info("Cross-val accuracy: %.4f ± %.4f", scores.mean(), scores.std())
-
-    # Train/test split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y,
         test_size=TEST_SIZE,
@@ -167,13 +150,13 @@ def train(df: pd.DataFrame) -> Pipeline:
         random_state=RANDOM_STATE
     )
 
-    logger.info("Training final model…")
+    logger.info("Training model…")
     pipeline.fit(X_train, y_train)
 
     y_pred = pipeline.predict(X_test)
 
     acc = accuracy_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred, pos_label="FAKE")
+    f1 = f1_score(y_test, y_pred)
 
     logger.info("=" * 50)
     logger.info("FINAL RESULTS")
@@ -214,6 +197,8 @@ def main():
 
     df = load_dataset(args.data_dir)
     df = preprocess(df)
+    df = balance_dataset(df)  # ✅ FIXED VERSION
+
     pipeline = train(df)
     save_model(pipeline, args.output_dir)
 

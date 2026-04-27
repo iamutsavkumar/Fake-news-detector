@@ -1,8 +1,9 @@
 """
-ModelService — improved version with:
-- Better preprocessing (matches training)
-- Confidence-based decision (UNCERTAIN handling)
-- Cleaner ML + heuristic integration
+ModelService — FINAL upgraded version
+- Supports numeric labels (0=FAKE, 1=REAL)
+- Proper confidence handling
+- UNCERTAIN logic
+- Clean preprocessing (matches training)
 """
 
 import logging
@@ -57,16 +58,14 @@ class ModelService:
 
             logger.info("Model loaded successfully.")
         else:
-            logger.warning(
-                "Model not found — using heuristic fallback."
-            )
+            logger.warning("Model not found — using heuristic fallback.")
             self._pipeline = None
 
     @property
     def is_loaded(self) -> bool:
         return self._pipeline is not None
 
-    # ── 🔥 NEW: CLEANING (must match training) ─────────────
+    # ── Cleaning (matches training) ───────────────────────
 
     def _clean_text(self, text: str) -> str:
         text = re.sub(r"http\S+", "", text)
@@ -76,9 +75,9 @@ class ModelService:
         text = re.sub(r"\s+", " ", text)
         return text.lower().strip()
 
-    # ── Inference ─────────────────────────────────────────
+    # ── Public Inference ──────────────────────────────────
 
-    def predict(self, text: str) -> Tuple[str, float]:
+    def predict(self, text: str) -> Tuple[int, float]:
         text = self._clean_text(text)
 
         if self._pipeline is not None:
@@ -92,7 +91,10 @@ class ModelService:
         if self._pipeline is not None:
             try:
                 proba = self._pipeline.predict_proba([sentence])[0]
-                fake_idx = list(self._pipeline.classes_).index("FAKE")
+
+                # 🔥 FIX: numeric labels (0=FAKE, 1=REAL)
+                fake_idx = list(self._pipeline.classes_).index(0)
+
                 return float(proba[fake_idx])
             except Exception:
                 pass
@@ -101,42 +103,30 @@ class ModelService:
 
     # ── ML Prediction ─────────────────────────────────────
 
-    def _predict_ml(self, text: str) -> Tuple[str, float]:
+    def _predict_ml(self, text: str) -> Tuple[int, float]:
         proba = self._pipeline.predict_proba([text])[0]
-        classes = list(self._pipeline.classes_)
 
-        predicted_class = classes[np.argmax(proba)]
         confidence = float(np.max(proba))
+        pred = int(self._pipeline.predict([text])[0])  # 0 or 1
 
-        # 🔥 NEW: smarter decision logic
-        if confidence < 0.6:
-            label = "UNCERTAIN"
-        else:
-            label = predicted_class
-
-        return label, round(confidence, 3)
+        return pred, round(confidence, 3)
 
     # ── Heuristic fallback ────────────────────────────────
 
-    def _predict_heuristic(self, text: str) -> Tuple[str, float]:
+    def _predict_heuristic(self, text: str) -> Tuple[int, float]:
         score = self._heuristic_suspicion(text)
 
         if score < 0.4:
-            label = "REAL"
+            return 1, 1.0 - score   # REAL
         elif score < 0.6:
-            label = "UNCERTAIN"
+            return 1, 0.5           # treat as weak REAL
         else:
-            label = "FAKE"
-
-        confidence = score if label == "FAKE" else 1.0 - score
-        return label, round(confidence, 3)
+            return 0, score         # FAKE
 
     # ── Heuristic scoring ─────────────────────────────────
 
     @staticmethod
     def _heuristic_suspicion(text: str) -> float:
-        lower = text.lower()
-
         score = 0.0
         total = 0.0
 

@@ -1,10 +1,5 @@
 """
-AnalysisService — orchestrates the full analysis pipeline:
-  1. Text cleaning
-  2. Sentence segmentation
-  3. Per-sentence suspicion scoring
-  4. Explanation generation
-  5. Domain credibility check
+AnalysisService — FINAL version (TRUE UNCERTAIN SUPPORT)
 """
 
 import re
@@ -18,9 +13,8 @@ from utils.domain_checker import DomainChecker
 
 logger = logging.getLogger(__name__)
 
-# Patterns that trigger specific explanation flags
+
 _RULE_PATTERNS: List[Tuple[str, str, str]] = [
-    # (pattern, flag_key, human label)
     (r"\b(breaking|exclusive|shocking|bombshell|exposed)\b",
      "sensational_language", "Sensational language"),
     (r"\b(hoax|conspiracy|deep state|fake media)\b",
@@ -37,61 +31,102 @@ _RULE_PATTERNS: List[Tuple[str, str, str]] = [
      "call_to_action", "Emotional call-to-action"),
     (r"\b(allegedly|reportedly|anonymous sources?|unverified)\b",
      "unverified_sourcing", "Unverified sourcing language"),
-    (r"\b(muslims?|jews?|immigrants?|liberals?|conservatives?)\b.*\b(all|always|never|hate|evil)\b",
-     "generalisation", "Harmful generalisation"),
 ]
 
 
 class AnalysisService:
-    """
-    Stateless service; call analyse() for the full pipeline.
-    """
 
     def __init__(self):
         self._model = ModelService.get_instance()
         self._domain_checker = DomainChecker()
-
-    # ── Public API ────────────────────────────────────────────────────────────
 
     def analyse(
         self,
         text: str,
         source_url: Optional[str] = None,
     ) -> Tuple[str, float, str, List[SentenceAnalysis], Optional[DomainInfo]]:
-        """
-        Full analysis pipeline.
 
-        Returns:
-            label        — "REAL" | "FAKE"
-            confidence   — float [0, 1]
-            explanation  — human-readable string
-            sentences    — per-sentence breakdown
-            domain_info  — optional domain credibility object
-        """
         cleaned = clean_text(text)
-        label, confidence = self._model.predict(cleaned)
+
+        # 🔥 1. SHORT TEXT
+        if len(cleaned.split()) < 8:
+            return (
+                "UNCERTAIN",
+                0.5,
+                "Text too short for reliable classification.",
+                [],
+                None,
+            )
+
+        # 🔥 2. MODEL PREDICTION
+        pred_label, confidence = self._model.predict(cleaned)
+        label = "REAL" if pred_label == 1 else "FAKE"
+
+        # 🔥 3. FAKE SIGNAL BOOST
+        suspicious_words = ["breaking", "shocking", "unbelievable", "secret", "exposed"]
+        boost = sum(0.05 for w in suspicious_words if w in cleaned.lower())
+        confidence = min(confidence + boost, 0.95)
+
+        # 🔥 4. REAL UNCERTAIN LOGIC (IMPORTANT PART)
+
+        try:
+            proba = self._model._pipeline.predict_proba([cleaned])[0]
+            sorted_proba = sorted(proba, reverse=True)
+            gap = sorted_proba[0] - sorted_proba[1]
+        except Exception:
+            gap = 1.0  # fallback (no uncertainty)
+
+        # CASE 1 — low confidence
+        if confidence < 0.55:
+            label = "UNCERTAIN"
+
+        # CASE 2 — model confused (KEY FIX)
+        elif gap < 0.15:
+            label = "UNCERTAIN"
+
+        # CASE 3 — weak fake prediction
+        elif confidence < 0.65 and label == "FAKE":
+            label = "UNCERTAIN"
+
+        # CASE 4 — cap overconfidence
+        elif confidence > 0.9:
+            confidence = 0.9
+
+        # ─────────────────────────────────────────────
+        # SENTENCE ANALYSIS
+        # ─────────────────────────────────────────────
 
         sentences = split_sentences(text)
         sentence_analyses = [self._analyse_sentence(s) for s in sentences]
 
+        # ─────────────────────────────────────────────
+        # DOMAIN CHECK
+        # ─────────────────────────────────────────────
+
         domain_info = None
         if source_url:
             domain_info = self._domain_checker.check(source_url)
-            # Domain credibility adjusts final confidence slightly
             confidence = self._adjust_for_domain(confidence, label, domain_info)
 
-        explanation = self._build_explanation(label, confidence, sentence_analyses, domain_info)
+        # ─────────────────────────────────────────────
+        # EXPLANATION
+        # ─────────────────────────────────────────────
+
+        explanation = self._build_explanation(
+            label,
+            confidence,
+            sentence_analyses,
+            domain_info
+        )
 
         return label, round(confidence, 3), explanation, sentence_analyses, domain_info
 
-    # ── Private helpers ───────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────
 
     def _analyse_sentence(self, sentence: str) -> SentenceAnalysis:
-        """Score a single sentence and collect triggered rule flags."""
         ml_score = self._model.predict_sentence(sentence)
         flags = self._get_flags(sentence)
 
-        # Blend ML score (primary) with rule density (secondary signal)
         rule_density = min(len(flags) / max(len(_RULE_PATTERNS), 1), 1.0)
         blended_score = round(0.75 * ml_score + 0.25 * rule_density, 3)
 
@@ -102,12 +137,13 @@ class AnalysisService:
         )
 
     def _get_flags(self, sentence: str) -> List[str]:
-        """Return human-readable labels for triggered rules."""
         flags = []
         for pattern, _, label in _RULE_PATTERNS:
             if re.search(pattern, sentence, re.IGNORECASE):
                 flags.append(label)
         return flags
+
+    # ─────────────────────────────────────────────
 
     def _adjust_for_domain(
         self,
@@ -117,7 +153,9 @@ class AnalysisService:
     ) -> float:
         if domain_info is None:
             return confidence
+
         adjustment = 0.0
+
         if domain_info.credibility == "trusted" and label == "REAL":
             adjustment = +0.05
         elif domain_info.credibility == "untrusted" and label == "FAKE":
@@ -126,7 +164,10 @@ class AnalysisService:
             adjustment = -0.05
         elif domain_info.credibility == "untrusted" and label == "REAL":
             adjustment = -0.05
+
         return round(min(max(confidence + adjustment, 0.0), 1.0), 3)
+
+    # ─────────────────────────────────────────────
 
     def _build_explanation(
         self,
@@ -135,19 +176,17 @@ class AnalysisService:
         sentences: List[SentenceAnalysis],
         domain_info: Optional[DomainInfo],
     ) -> str:
-        """
-        Generate a concise, human-readable explanation for the prediction.
-        Combines model confidence, triggered patterns, and domain signals.
-        """
+
         pct = int(confidence * 100)
         parts: List[str] = []
 
         if label == "FAKE":
-            parts.append(f"The article shows {pct}% likelihood of being fabricated or misleading.")
-        else:
+            parts.append(f"The article shows {pct}% likelihood of being misleading.")
+        elif label == "REAL":
             parts.append(f"The article appears credible with {pct}% confidence.")
+        else:
+            parts.append("The model is uncertain about this content.")
 
-        # Summarise the most common flags
         all_flags: List[str] = []
         for s in sentences:
             all_flags.extend(s.flags)
@@ -155,24 +194,21 @@ class AnalysisService:
         if all_flags:
             from collections import Counter
             top = Counter(all_flags).most_common(3)
-            flag_summary = ", ".join(f[0] for f in top)
-            parts.append(f"Detected signals include: {flag_summary}.")
+            parts.append(
+                "Detected signals include: " +
+                ", ".join(f[0] for f in top)
+            )
 
-        # High-suspicion sentence count
         suspicious_count = sum(1 for s in sentences if s.score >= 0.6)
         if suspicious_count:
             parts.append(
-                f"{suspicious_count} sentence{'s' if suspicious_count > 1 else ''} "
-                f"flagged as highly suspicious."
+                f"{suspicious_count} sentence(s) flagged as suspicious."
             )
 
-        # Domain
         if domain_info:
             if domain_info.credibility == "trusted":
-                parts.append(f"Source domain '{domain_info.domain}' is a recognised credible outlet.")
+                parts.append(f"Source '{domain_info.domain}' is credible.")
             elif domain_info.credibility == "untrusted":
-                parts.append(
-                    f"Source domain '{domain_info.domain}' is flagged as a low-credibility outlet."
-                )
+                parts.append(f"Source '{domain_info.domain}' is low credibility.")
 
         return " ".join(parts)
