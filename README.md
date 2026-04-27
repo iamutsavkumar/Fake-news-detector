@@ -4,6 +4,12 @@ A production-quality full-stack application that classifies news articles as **R
 
 ---
 
+# UI Preview
+
+![UI Screenshot](frontend/assets/ui.png)
+
+---
+
 ## Table of Contents
 
 1. [Project Overview](#project-overview)
