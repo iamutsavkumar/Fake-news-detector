@@ -1,0 +1,43 @@
+{
+  "test_cases": [
+    {
+      "id": "real_001",
+      "expected": "REAL",
+      "text": "The Federal Reserve held interest rates steady on Wednesday, as policymakers indicated they want to see further progress on inflation before making any adjustments. Fed Chair Jerome Powell said at a press conference that the central bank remains committed to returning inflation to its 2 percent target. The decision was unanimous among voting members of the Federal Open Market Committee."
+    },
+    {
+      "id": "fake_001",
+      "expected": "FAKE",
+      "text": "BREAKING: Scientists EXPOSE the SHOCKING truth the mainstream media won't tell you! New research PROVES that drinking tap water causes mind control. Anonymous sources deep inside the government confirm this bombshell revelation. Share this before they DELETE it! Wake up sheeple — they don't want you to know this SECRET!"
+    },
+    {
+      "id": "fake_002",
+      "expected": "FAKE",
+      "text": "Exposed: The deep state conspiracy to replace all world leaders with AI robots has been confirmed by sources close to the White House. Insiders say the plan is already 80% complete. Mainstream media is covering this up because they are part of the New World Order. This is the biggest hoax ever perpetrated on humanity. Share this immediately before it gets censored."
+    },
+    {
+      "id": "real_002",
+      "expected": "REAL",
+      "text": "NASA's Perseverance rover has collected its 23rd rock sample from Mars, mission scientists announced Tuesday. The sample was taken from a region scientists believe may have once held ancient microbial life. Analysis of the samples will require them to be returned to Earth, a mission planned for the early 2030s. The rover landed in Jezero Crater in February 2021."
+    },
+    {
+      "id": "mixed_001",
+      "expected": "FAKE",
+      "text": "A new study published last week claims to show a link between 5G towers and headaches. However, the study involved only 12 participants and was not peer reviewed. Experts and health authorities have repeatedly stated there is no evidence that 5G causes health problems. Despite this, the story has gone viral with claims that governments are hiding the true dangers of 5G radiation from the public."
+    }
+  ],
+  "test_urls": [
+    {
+      "id": "url_real_001",
+      "expected": "REAL",
+      "url": "https://apnews.com/hub/science",
+      "note": "AP News — trusted source"
+    },
+    {
+      "id": "url_real_002",
+      "expected": "REAL",
+      "url": "https://www.bbc.com/news/science-environment",
+      "note": "BBC Science — trusted source"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+.wrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--fake-dim);
+  border: 1px solid rgba(255, 77, 109, 0.3);
+  border-radius: var(--r-md);
+  animation: fadeUp 0.3s var(--ease) both;
+}
+
+.icon {
+  font-size: 1.3rem;
+  color: var(--fake);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--fake);
+  margin-bottom: 0.25rem;
+}
+
+.message {
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  line-height: 1.5;
+}
