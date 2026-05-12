@@ -1,8 +1,3 @@
-"""
-Fake News Detection API
-Entry point for the FastAPI application.
-"""
-
 import logging
 from contextlib import asynccontextmanager
 
