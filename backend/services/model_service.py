@@ -1,11 +1,3 @@
-"""
-ModelService — FINAL upgraded version
-- Supports numeric labels (0=FAKE, 1=REAL)
-- Proper confidence handling
-- UNCERTAIN logic
-- Clean preprocessing (matches training)
-"""
-
 import logging
 import threading
 import re
