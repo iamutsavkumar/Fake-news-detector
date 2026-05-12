@@ -1,8 +1,3 @@
-"""
-Application configuration via environment variables.
-Uses pydantic-settings for type-safe, validated config.
-"""
-
 from functools import lru_cache
 from pathlib import Path
 from typing import List
