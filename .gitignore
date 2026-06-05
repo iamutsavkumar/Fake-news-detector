@@ -10,6 +10,7 @@ __pycache__/
 ml/data/
 *.csv
 *.joblib
+!backend/models/*.joblib
 
 # Node
 node_modules/
