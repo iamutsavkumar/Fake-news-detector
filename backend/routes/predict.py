@@ -1,12 +1,18 @@
 """
 routes/predict.py
+
 FINAL version:
-- Confidence (percent + raw)
-- UNCERTAIN fallback for scraping failures
-- Clean responses
+
+* Lazy-loaded AnalysisService (prevents startup OOM)
+* Thread-safe singleton via lru_cache
+* Confidence (percent + raw)
+* UNCERTAIN fallback for scraping failures
+* Clean responses
 """
 
 import logging
+from functools import lru_cache
+
 from fastapi import APIRouter, HTTPException
 
 from models.schemas import (
@@ -20,26 +26,53 @@ from services.scraper_service import ScraperService
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_analysis = AnalysisService()
+# ── Services ────────────────────────────────────────────
+
 _scraper = ScraperService()
+
+
+@lru_cache(maxsize=1)
+def get_analysis_service() -> AnalysisService:
+    """
+    Lazily create AnalysisService only when needed.
+    Prevents loading large ML models during app startup.
+    """
+    logger.info("Creating AnalysisService...")
+    return AnalysisService()
 
 
 # ── Helpers ─────────────────────────────────────────────
 
-def _format_response(label, confidence, explanation, sentences, domain_info, **extra):
+def _format_response(
+    label: str,
+    confidence: float,
+    explanation: str | None,
+    sentences: list | None,
+    domain_info,
+    **extra,
+) -> PredictionResponse:
     """
     Standardized response formatting.
     """
+
+    confidence = max(0.0, min(1.0, float(confidence)))
 
     confidence_percent = round(confidence * 100, 1)
     confidence_raw = round(confidence, 3)
 
     if label == "UNCERTAIN":
-        interpretation = "⚠️ The model is not confident. This content may require verification."
+        interpretation = (
+            "⚠️ The model is not confident. "
+            "This content may require verification."
+        )
     elif label == "FAKE":
-        interpretation = "🚨 This content appears suspicious or misleading."
+        interpretation = (
+            "🚨 This content appears suspicious or misleading."
+        )
     else:
-        interpretation = "✅ This content appears reliable."
+        interpretation = (
+            "✅ This content appears reliable."
+        )
 
     return PredictionResponse(
         label=label,
@@ -49,7 +82,7 @@ def _format_response(label, confidence, explanation, sentences, domain_info, **e
         sentences=sentences or [],
         domain_info=domain_info,
         interpretation=interpretation,
-        **extra
+        **extra,
     )
 
 
@@ -57,82 +90,129 @@ def _format_response(label, confidence, explanation, sentences, domain_info, **e
 
 @router.post("/predict", response_model=PredictionResponse)
 async def predict_text(body: TextPredictRequest):
+    """
+    Analyze raw text submitted by the user.
+    """
+
     try:
-        label, confidence, explanation, sentences, domain_info = _analysis.analyse(
-            text=body.text,
-            source_url=None,
-        )
+        analysis = get_analysis_service()
 
-        logger.info(f"[TEXT] {label} ({confidence:.3f})")
-
-        return _format_response(
+        (
             label,
             confidence,
             explanation,
             sentences,
-            domain_info
+            domain_info,
+        ) = analysis.analyse(
+            text=body.text,
+            source_url=None,
+        )
+
+        logger.info(
+            "[TEXT] %s (%.3f)",
+            label,
+            confidence,
+        )
+
+        return _format_response(
+            label=label,
+            confidence=confidence,
+            explanation=explanation,
+            sentences=sentences,
+            domain_info=domain_info,
         )
 
     except Exception as exc:
         logger.exception("Text prediction failed")
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {exc}")
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prediction failed: {exc}",
+        )
 
 
 # ── URL ANALYSIS ────────────────────────────────────────
 
 @router.post("/analyze-url", response_model=PredictionResponse)
 async def analyze_url(body: UrlPredictRequest):
+    """
+    Fetch article from URL and analyze its content.
+    """
 
     # Step 1: Fetch article
     try:
-        article_text, article_title = await _scraper.fetch_article(body.url)
+        article_text, article_title = await _scraper.fetch_article(
+            body.url
+        )
 
-        # Safety check
         if not article_text or len(article_text.strip()) < 50:
             raise ValueError("Insufficient article content")
 
     except (ValueError, RuntimeError) as exc:
-        logger.warning(f"[URL FAIL] {body.url} → {exc}")
+        logger.warning(
+            "[URL FAIL] %s → %s",
+            body.url,
+            exc,
+        )
 
-        # 🔥 IMPORTANT: fallback instead of error
         return _format_response(
             label="UNCERTAIN",
             confidence=0.5,
-            explanation="Could not extract article. This website may block scraping. Try pasting text instead.",
+            explanation=(
+                "Could not extract article. "
+                "This website may block scraping. "
+                "Try pasting the article text instead."
+            ),
             sentences=[],
             domain_info=None,
             source_url=body.url,
             article_title=None,
         )
 
-    # Step 2: Analyse
+    # Step 2: Analyze content
     try:
-        label, confidence, explanation, sentences, domain_info = _analysis.analyse(
-            text=article_text,
-            source_url=body.url,
-        )
+        analysis = get_analysis_service()
 
-        logger.info(f"[URL] {label} ({confidence:.3f}) → {body.url}")
-
-        return _format_response(
+        (
             label,
             confidence,
             explanation,
             sentences,
             domain_info,
+        ) = analysis.analyse(
+            text=article_text,
+            source_url=body.url,
+        )
+
+        logger.info(
+            "[URL] %s (%.3f) → %s",
+            label,
+            confidence,
+            body.url,
+        )
+
+        return _format_response(
+            label=label,
+            confidence=confidence,
+            explanation=explanation,
+            sentences=sentences,
+            domain_info=domain_info,
             source_url=body.url,
             article_title=article_title,
         )
 
-    except Exception as exc:
+    except Exception:
         logger.exception("URL analysis failed")
 
         return _format_response(
             label="UNCERTAIN",
             confidence=0.5,
-            explanation="Analysis failed. Try pasting the article text manually.",
+            explanation=(
+                "Analysis failed. "
+                "Try pasting the article text manually."
+            ),
             sentences=[],
             domain_info=None,
             source_url=body.url,
-            article_title=None,
+            article_title=article_title,
         )

@@ -1,7 +1,6 @@
 import logging
 import threading
 import re
-from pathlib import Path
 from typing import Optional, Tuple
 
 import joblib
@@ -19,12 +18,16 @@ class ModelService:
 
     def __init__(self):
         settings = get_settings()
+
         self.model_path = settings.abs_model_path
         self.vectorizer_path = settings.abs_vectorizer_path
-        self._pipeline: Optional[Pipeline] = None
-        self._load()
 
-    # ── Singleton ─────────────────────────────────────────
+        self._pipeline: Optional[Pipeline] = None
+        self._loaded = False
+
+    # ----------------------------------------------------
+    # Singleton
+    # ----------------------------------------------------
 
     @classmethod
     def get_instance(cls) -> "ModelService":
@@ -32,32 +35,75 @@ class ModelService:
             with _lock:
                 if cls._instance is None:
                     cls._instance = cls()
+
         return cls._instance
 
-    # ── Model loading ─────────────────────────────────────
+    # ----------------------------------------------------
+    # Lazy loading
+    # ----------------------------------------------------
 
-    def _load(self):
-        if self.model_path.exists() and self.vectorizer_path.exists():
-            logger.info("Loading model from %s", self.model_path)
+    def _ensure_loaded(self):
+        if self._loaded:
+            return
 
-            vectorizer = joblib.load(self.vectorizer_path)
-            classifier = joblib.load(self.model_path)
+        with _lock:
 
-            self._pipeline = Pipeline([
-                ("tfidf", vectorizer),
-                ("clf", classifier),
-            ])
+            if self._loaded:
+                return
 
-            logger.info("Model loaded successfully.")
-        else:
-            logger.warning("Model not found — using heuristic fallback.")
-            self._pipeline = None
+            if (
+                self.model_path.exists()
+                and self.vectorizer_path.exists()
+            ):
+
+                logger.info(
+                    "Loading vectorizer from %s",
+                    self.vectorizer_path,
+                )
+
+                vectorizer = joblib.load(
+                    self.vectorizer_path
+                )
+
+                logger.info(
+                    "Loading classifier from %s",
+                    self.model_path,
+                )
+
+                classifier = joblib.load(
+                    self.model_path
+                )
+
+                self._pipeline = Pipeline(
+                    [
+                        ("tfidf", vectorizer),
+                        ("clf", classifier),
+                    ]
+                )
+
+                logger.info("Model loaded successfully")
+
+            else:
+
+                logger.warning(
+                    "Model files missing. Using heuristic mode."
+                )
+
+                self._pipeline = None
+
+            self._loaded = True
+
+    # ----------------------------------------------------
+    # Status
+    # ----------------------------------------------------
 
     @property
     def is_loaded(self) -> bool:
-        return self._pipeline is not None
+        return self._loaded
 
-    # ── Cleaning (matches training) ───────────────────────
+    # ----------------------------------------------------
+    # Text cleaning
+    # ----------------------------------------------------
 
     def _clean_text(self, text: str) -> str:
         text = re.sub(r"http\S+", "", text)
@@ -65,11 +111,17 @@ class ModelService:
         text = re.sub(r"\S+@\S+", "", text)
         text = re.sub(r"[^a-zA-Z ]", " ", text)
         text = re.sub(r"\s+", " ", text)
+
         return text.lower().strip()
 
-    # ── Public Inference ──────────────────────────────────
+    # ----------------------------------------------------
+    # Public prediction
+    # ----------------------------------------------------
 
     def predict(self, text: str) -> Tuple[int, float]:
+
+        self._ensure_loaded()
+
         text = self._clean_text(text)
 
         if self._pipeline is not None:
@@ -78,47 +130,73 @@ class ModelService:
         return self._predict_heuristic(text)
 
     def predict_sentence(self, sentence: str) -> float:
+
+        self._ensure_loaded()
+
         sentence = self._clean_text(sentence)
 
         if self._pipeline is not None:
             try:
-                proba = self._pipeline.predict_proba([sentence])[0]
+                proba = self._pipeline.predict_proba(
+                    [sentence]
+                )[0]
 
-                # 🔥 FIX: numeric labels (0=FAKE, 1=REAL)
-                fake_idx = list(self._pipeline.classes_).index(0)
+                fake_idx = list(
+                    self._pipeline.classes_
+                ).index(0)
 
                 return float(proba[fake_idx])
+
             except Exception:
                 pass
 
         return self._heuristic_suspicion(sentence)
 
-    # ── ML Prediction ─────────────────────────────────────
+    # ----------------------------------------------------
+    # ML prediction
+    # ----------------------------------------------------
 
     def _predict_ml(self, text: str) -> Tuple[int, float]:
-        proba = self._pipeline.predict_proba([text])[0]
+
+        proba = self._pipeline.predict_proba(
+            [text]
+        )[0]
 
         confidence = float(np.max(proba))
-        pred = int(self._pipeline.predict([text])[0])  # 0 or 1
+
+        pred = int(
+            self._pipeline.predict([text])[0]
+        )
 
         return pred, round(confidence, 3)
 
-    # ── Heuristic fallback ────────────────────────────────
+    # ----------------------------------------------------
+    # Heuristic fallback
+    # ----------------------------------------------------
 
-    def _predict_heuristic(self, text: str) -> Tuple[int, float]:
+    def _predict_heuristic(
+        self,
+        text: str,
+    ) -> Tuple[int, float]:
+
         score = self._heuristic_suspicion(text)
 
         if score < 0.4:
-            return 1, 1.0 - score   # REAL
-        elif score < 0.6:
-            return 1, 0.5           # treat as weak REAL
-        else:
-            return 0, score         # FAKE
+            return 1, 1.0 - score
 
-    # ── Heuristic scoring ─────────────────────────────────
+        elif score < 0.6:
+            return 1, 0.5
+
+        else:
+            return 0, score
+
+    # ----------------------------------------------------
+    # Heuristic scoring
+    # ----------------------------------------------------
 
     @staticmethod
     def _heuristic_suspicion(text: str) -> float:
+
         score = 0.0
         total = 0.0
 
@@ -133,8 +211,23 @@ class ModelService:
         ]
 
         for pattern, weight in checks:
-            if re.search(pattern, text, re.IGNORECASE):
+
+            if re.search(
+                pattern,
+                text,
+                re.IGNORECASE,
+            ):
                 score += weight
+
             total += weight
 
-        return round(min(max(score / total if total else 0.0, 0.0), 1.0), 3)
+        return round(
+            min(
+                max(
+                    score / total if total else 0.0,
+                    0.0,
+                ),
+                1.0,
+            ),
+            3,
+        )
