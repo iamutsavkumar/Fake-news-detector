@@ -8,7 +8,6 @@ from fastapi.middleware.gzip import GZipMiddleware
 from config import get_settings
 from routes.predict import router as predict_router
 from routes.health import router as health_router
-from services.model_service import ModelService
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -23,10 +22,7 @@ settings = get_settings()
 # ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load heavy resources once at startup; release on shutdown."""
-    logger.info("Loading ML model…")
-    ModelService.get_instance()          # pre-warm singleton
-    logger.info("Model ready.")
+    logger.info("Application started.")
     yield
     logger.info("Shutting down.")
 
