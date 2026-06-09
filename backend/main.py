@@ -5,9 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from config import get_settings
-from routes.predict import router as predict_router
-from routes.health import router as health_router
+from .config import get_settings
+from .routes.predict import router as predict_router
+from .routes.health import router as health_router
+
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-# ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
+# ── Lifespan (startup / shutdown) ────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application started.")
@@ -27,7 +28,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down.")
 
 
-# ── App factory ───────────────────────────────────────────────────────────────
+# ── App factory ──────────────────────────────────────────────────────────────
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Fake News Detection API",
@@ -36,7 +37,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── Middleware ────────────────────────────────────────────────────────────
+    # CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -44,11 +45,20 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-    # ── Routers ───────────────────────────────────────────────────────────────
+    # Compression
+    app.add_middleware(
+        GZipMiddleware,
+        minimum_size=1000,
+    )
+
+    # Routers
     app.include_router(health_router, tags=["Health"])
-    app.include_router(predict_router, prefix="/api/v1", tags=["Prediction"])
+    app.include_router(
+        predict_router,
+        prefix="/api/v1",
+        tags=["Prediction"],
+    )
 
     return app
 
@@ -58,8 +68,9 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
-        "main:app",
+        "backend.main:app",
         host=settings.app_host,
         port=settings.app_port,
         reload=settings.app_env == "development",
