@@ -15,17 +15,18 @@ from functools import lru_cache
 
 from fastapi import APIRouter, HTTPException
 
-from models.schemas import (
+# FIXED IMPORTS
+from ..models.schemas import (
     TextPredictRequest,
     UrlPredictRequest,
     PredictionResponse,
 )
-from services.analysis_service import AnalysisService
-from services.scraper_service import ScraperService
+
+from ..services.analysis_service import AnalysisService
+from ..services.scraper_service import ScraperService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
 # ── Services ────────────────────────────────────────────
 
 _scraper = ScraperService()
