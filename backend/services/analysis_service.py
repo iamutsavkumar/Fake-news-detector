@@ -6,10 +6,10 @@ import re
 import logging
 from typing import List, Tuple, Optional
 
-from models.schemas import SentenceAnalysis, DomainInfo
-from services.model_service import ModelService
-from utils.text_utils import clean_text, split_sentences
-from utils.domain_checker import DomainChecker
+from ..models.schemas import SentenceAnalysis, DomainInfo
+from .model_service import ModelService
+from ..utils.text_utils import clean_text, split_sentences
+from ..utils.domain_checker import DomainChecker
 
 logger = logging.getLogger(__name__)
 
