@@ -7,7 +7,7 @@ import joblib
 import numpy as np
 from sklearn.pipeline import Pipeline
 
-from config import get_settings
+from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 _lock = threading.Lock()

@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from newspaper import Article
 import trafilatura
 
-from config import get_settings
+from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 
