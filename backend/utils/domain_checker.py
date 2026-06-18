@@ -7,8 +7,7 @@ Lists are intentionally conservative — when in doubt, return "unknown".
 from typing import Optional
 from urllib.parse import urlparse
 
-from models.schemas import DomainInfo
-
+from ..models.schemas import DomainInfo
 # ── Curated domain lists ──────────────────────────────────────────────────────
 # Sources: Media Bias / Fact Check, NewsGuard, academic literature on fake news.
 # These are indicative examples — extend with a fuller dataset in production.
