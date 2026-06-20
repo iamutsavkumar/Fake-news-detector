@@ -32,10 +32,20 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Fake News Detection API",
-        description="Classify news articles as REAL or FAKE with sentence-level analysis.",
+        description="Classify news articles as REAL, FAKE, or UNCERTAIN with sentence-level analysis.",
         version="1.0.0",
         lifespan=lifespan,
     )
+
+    # Root endpoint
+    @app.get("/", tags=["Root"])
+    async def root():
+        return {
+            "message": "Fake News Detection API is running",
+            "version": "1.0.0",
+            "docs": "/docs",
+            "health": "/health",
+        }
 
     # CORS
     app.add_middleware(
@@ -54,6 +64,7 @@ def create_app() -> FastAPI:
 
     # Routers
     app.include_router(health_router, tags=["Health"])
+
     app.include_router(
         predict_router,
         prefix="/api/v1",
